@@ -47,10 +47,19 @@ const ActiveNft = ({ bonus }) => (
 );
 
 const Profile = () => {
-  const { ready, user, setUser, loading } = useAuth();
+  const { ready, user, setUser, loading, highestToken } = useAuth();
   const [mine, setMine] = useState(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+
+  const formatToken = (t) => {
+    if (!t) return null;
+    const decimals = parseInt(t.token?.decimals) || 18;
+    const amt = parseFloat(t.value) / (10 ** decimals);
+    const symbol = t.token?.symbol || 'Token';
+    const formatted = amt > 100 ? amt.toFixed(2) : amt.toFixed(4);
+    return `${formatted} ${symbol}`;
+  };
 
   const load = async () => {
     setErr('');
@@ -114,6 +123,7 @@ const Profile = () => {
                   <h1 className="font-pixel truncate text-[16px] md:text-[20px]" data-testid="profile-username">@{user.username}</h1>
                   <div className="font-mono mt-2 flex items-center gap-2 text-[11px] tracking-widest text-[var(--ink-soft)]" data-testid="profile-address">
                     <Wallet size={11} /> {user.address.slice(0, 6)}...{user.address.slice(-4)}
+                    {highestToken && <span className="ml-2 border-l border-[var(--ink-soft)] pl-2">💎 {formatToken(highestToken)}</span>}
                   </div>
                   <div className="font-mono mt-1 text-[11px] tracking-widest text-[var(--ink-soft)]">STRIKER: {char.name.toUpperCase()} &middot; <Link to="/#characters" className="underline">change</Link></div>
                 </div>

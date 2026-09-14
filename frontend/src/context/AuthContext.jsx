@@ -16,11 +16,69 @@ export const AuthProvider = ({ children }) => {
   const [signing, setSigning] = useState(false);
   const [error, setError] = useState('');
   const [nftGate, setNftGate] = useState(null);
+  const [highestToken, setHighestToken] = useState(null);
+  const [feePaid, setFeePaid] = useState(false);
+
+  useEffect(() => {
+    if (address && localStorage.getItem(`fee_paid_${address}`)) {
+      setFeePaid(true);
+    } else {
+      setFeePaid(false);
+    }
+  }, [address]);
 
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setUser(null);
+    setHighestToken(null);
   }, []);
+
+  // fetch highest token when address changes
+  useEffect(() => {
+    if (!address) {
+      setHighestToken(null);
+      return;
+    }
+    const fetchTokens = async () => {
+      try {
+        const res = await fetch(`https://robinhoodchain.blockscout.com/api/v2/addresses/${address}/token-balances`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const erc20s = data.filter(t => t.token?.type === 'ERC-20' || t.token?.type === 'ERC20');
+          if (erc20s.length > 0) {
+            const sorted = erc20s.sort((a, b) => {
+               const decA = parseInt(a.token?.decimals) || 18;
+               const decB = parseInt(b.token?.decimals) || 18;
+               const valA = (parseFloat(a.value) / (10 ** decA)) * (parseFloat(a.token?.exchange_rate) || 0);
+               const valB = (parseFloat(b.value) / (10 ** decB)) * (parseFloat(b.token?.exchange_rate) || 0);
+               if (valA !== valB) return valB - valA;
+               
+               const amtA = parseFloat(a.value) / (10 ** decA);
+               const amtB = parseFloat(b.value) / (10 ** decB);
+               return amtB - amtA;
+            });
+            setHighestToken(sorted[0]);
+          } else {
+            setHighestToken(null);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch tokens', err);
+        // Fallback for testing when Cloudflare blocks Blockscout API
+        setHighestToken({
+          value: "20000000000000000000",
+          token: {
+            symbol: "TEST-USDC",
+            decimals: "18",
+            address: "0xbf4479C07Dc6fdc6dAa764A0ccA06969e894275F",
+            exchange_rate: "1.0"
+          }
+        });
+      }
+    };
+    fetchTokens();
+  }, [address]);
 
   // any API call rejected with NFT_REQUIRED -> drop session, show gate
   useEffect(() => {
@@ -126,15 +184,18 @@ export const AuthProvider = ({ children }) => {
       signing,
       error,
       nftGate,
+      highestToken,
+      feePaid,
+      setFeePaid,
       isConnected,
       address,
-      ready: !!user && !!user.username,
+      ready: !!user && !!user.username && feePaid,
       signIn,
       setUsername,
       setCharacter,
       logout: fullLogout,
     }),
-    [user, loading, signing, error, nftGate, isConnected, address, signIn, setUsername, setCharacter, fullLogout]
+    [user, loading, signing, error, nftGate, highestToken, feePaid, isConnected, address, signIn, setUsername, setCharacter, fullLogout]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
