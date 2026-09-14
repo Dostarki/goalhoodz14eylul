@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { useAccount, useChainId, useDisconnect, useSwitchChain } from 'wagmi';
+import { useAccount, useBalance, useChainId, useDisconnect, useSwitchChain } from 'wagmi';
 import { api, TOKEN_KEY, errMsg, nftGateOf } from '../lib/api';
 import { robinhood } from '../web3/config';
 
@@ -33,52 +33,24 @@ export const AuthProvider = ({ children }) => {
     setHighestToken(null);
   }, []);
 
-  // fetch highest token when address changes
+  // native ETH balance on Robinhood Chain (Blockscout is Cloudflare-blocked, so we
+  // read the native balance directly from the wallet/RPC via wagmi — always works).
+  const { data: nativeBal } = useBalance({
+    address,
+    chainId: robinhood.id,
+    query: { enabled: !!address, refetchInterval: 15000 },
+  });
+
   useEffect(() => {
-    if (!address) {
+    if (address && nativeBal?.value != null) {
+      setHighestToken({
+        value: nativeBal.value.toString(),
+        token: { symbol: nativeBal.symbol || 'ETH', decimals: nativeBal.decimals ?? 18, address: null, isNative: true },
+      });
+    } else {
       setHighestToken(null);
-      return;
     }
-    const fetchTokens = async () => {
-      try {
-        const res = await fetch(`https://robinhoodchain.blockscout.com/api/v2/addresses/${address}/token-balances`);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          const erc20s = data.filter(t => t.token?.type === 'ERC-20' || t.token?.type === 'ERC20');
-          if (erc20s.length > 0) {
-            const sorted = erc20s.sort((a, b) => {
-               const decA = parseInt(a.token?.decimals) || 18;
-               const decB = parseInt(b.token?.decimals) || 18;
-               const valA = (parseFloat(a.value) / (10 ** decA)) * (parseFloat(a.token?.exchange_rate) || 0);
-               const valB = (parseFloat(b.value) / (10 ** decB)) * (parseFloat(b.token?.exchange_rate) || 0);
-               if (valA !== valB) return valB - valA;
-               
-               const amtA = parseFloat(a.value) / (10 ** decA);
-               const amtB = parseFloat(b.value) / (10 ** decB);
-               return amtB - amtA;
-            });
-            setHighestToken(sorted[0]);
-          } else {
-            setHighestToken(null);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch tokens', err);
-        // Fallback for testing when Cloudflare blocks Blockscout API
-        setHighestToken({
-          value: "20000000000000000000",
-          token: {
-            symbol: "TEST-USDC",
-            decimals: "18",
-            address: "0xbf4479C07Dc6fdc6dAa764A0ccA06969e894275F",
-            exchange_rate: "1.0"
-          }
-        });
-      }
-    };
-    fetchTokens();
-  }, [address]);
+  }, [address, nativeBal?.value, nativeBal?.symbol, nativeBal?.decimals]);
 
   // any API call rejected with NFT_REQUIRED -> drop session, show gate
   useEffect(() => {
