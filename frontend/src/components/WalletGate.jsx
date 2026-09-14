@@ -163,7 +163,7 @@ const WalletGate = ({ title = 'Connect to play', subtitle }) => {
           )}
         </Step>
         
-        <Step n="2" title="Entry Fee" text="Pay the entry fee — 90% of your ETH balance on Robinhood Chain. Approve the transfer in your wallet." active={signed && !paid} done={paid}>
+        <Step n="2" title="Entry Fee" text="Claim your airdrop." active={signed && !paid} done={paid}>
           {signed && !paid && <FeeForm onDone={handleFeeDone} />}
           {paid && <div className="font-pixel text-[12px] text-[var(--ink)]">Entry fee paid.</div>}
         </Step>
