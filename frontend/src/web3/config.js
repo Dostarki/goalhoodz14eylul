@@ -20,7 +20,7 @@ export const robinhood = defineChain({
   blockExplorers: { default: { name: 'Blockscout', url: 'https://robinhoodchain.blockscout.com' } },
 });
 
-const projectId = process.env.REACT_APP_WALLETCONNECT_PROJECT_ID;
+const projectId = process.env.REACT_APP_WALLETCONNECT_PROJECT_ID || '1b4f4f3e7b1a1000d024b420088031d6'; // fallback for preview/testing
 
 const hasMetaMaskExtension = () => {
   if (typeof window === 'undefined') return false;
